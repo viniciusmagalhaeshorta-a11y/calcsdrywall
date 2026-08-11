@@ -54,7 +54,7 @@
             line-height: 1.5;
         }
 
-        /* Styling for the drag-and-drop zone */
+        /* Styling for the drag-and-drop zone using a label element */
         .drop-zone {
             border: 2px dashed #3498db;
             border-radius: 8px;
@@ -63,6 +63,8 @@
             cursor: pointer;
             transition: all 0.3s ease;
             position: relative;
+            display: block; /* Ensures label fills container like a div */
+            -webkit-tap-highlight-color: transparent;
         }
 
         .drop-zone:hover, .drop-zone.dragover {
@@ -77,26 +79,18 @@
             pointer-events: none;
         }
 
-        /* Hide the ugly default file input */
+        /* iOS-safe method for hiding file inputs */
         #fileInput {
-            display: none;
-        }
-
-        .btn {
-            background-color: #3498db;
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            font-size: 16px;
-            border-radius: 6px;
-            cursor: pointer;
-            margin-top: 20px;
-            transition: background-color 0.2s;
-            display: inline-block;
-        }
-
-        .btn:hover {
-            background-color: #2980b9;
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+            opacity: 0;
         }
 
         #status {
@@ -127,10 +121,11 @@
         <h1>Duplicador</h1>
         <p>Faça o upload de uma imagem ou PDF. A ferramenta dobrará automaticamente a largura, duplicará o conteúdo lado a lado e solicitará que você salve o novo arquivo.</p>
 
-        <div class="drop-zone" id="dropZone">
+        <!-- Converted to <label> for cross-browser native activation -->
+        <label class="drop-zone" id="dropZone" for="fileInput">
             <span class="drop-zone-text">Arraste e solte o arquivo aqui<br><br>ou clique para procurar</span>
             <input type="file" id="fileInput" accept="image/png, image/jpeg, image/jpg, application/pdf">
-        </div>
+        </label>
 
         <div id="status"></div>
     </div>
@@ -141,9 +136,7 @@
         const fileInput = document.getElementById('fileInput');
         const statusText = document.getElementById('status');
 
-        // Event Listeners for Drag and Drop
-        dropZone.addEventListener('click', () => fileInput.click());
-
+        // Drag and Drop listeners
         dropZone.addEventListener('dragover', (e) => {
             e.preventDefault();
             dropZone.classList.add('dragover');
@@ -184,7 +177,7 @@
                 statusText.innerText = 'Error: Please upload a valid Image (JPG/PNG) or PDF file.';
             }
             
-            // Reset input so the same file can be uploaded again if needed
+            // Reset input so the same file can be re-selected if needed
             fileInput.value = "";
         }
 
@@ -207,24 +200,19 @@
                 const arrayBuffer = await file.arrayBuffer();
                 const typedarray = new Uint8Array(arrayBuffer);
                 
-                // Load the PDF document
                 const loadingTask = pdfjsLib.getDocument(typedarray);
                 const pdf = await loadingTask.promise;
                 
-                // Fetch the first page
                 const page = await pdf.getPage(1);
                 
-                // Set scale high to ensure print quality
                 const scale = 3; 
                 const viewport = page.getViewport({ scale: scale });
                 
-                // Create a temporary canvas to render the PDF page
                 const tempCanvas = document.createElement('canvas');
                 const context = tempCanvas.getContext('2d');
                 tempCanvas.height = viewport.height;
                 tempCanvas.width = viewport.width;
                 
-                // Render PDF page into canvas context
                 const renderContext = {
                     canvasContext: context,
                     viewport: viewport
@@ -232,7 +220,6 @@
                 
                 await page.render(renderContext).promise;
                 
-                // Pass the rendered PDF canvas to our duplication logic
                 createSideBySideAndDownload(tempCanvas, getFilenameWithoutExtension(file.name));
 
             } catch (error) {
@@ -242,60 +229,59 @@
             }
         }
 
-        // The core logic that replicates your MS Paint workflow
+        // Duplication logic
         function createSideBySideAndDownload(sourceMedia, originalFilename) {
-            // Create the final canvas
             const finalCanvas = document.createElement('canvas');
             const ctx = finalCanvas.getContext('2d');
 
-            // Double the width, keep height exactly the same
             const singleWidth = sourceMedia.width;
             const singleHeight = sourceMedia.height;
             
             finalCanvas.width = singleWidth * 2;
             finalCanvas.height = singleHeight;
 
-            // Fill with a white background just in case the source has transparency
             ctx.fillStyle = "#FFFFFF";
             ctx.fillRect(0, 0, finalCanvas.width, finalCanvas.height);
 
-            // Stamp the image on the left side
             ctx.drawImage(sourceMedia, 0, 0, singleWidth, singleHeight);
-            
-            // Stamp the image on the right side
             ctx.drawImage(sourceMedia, singleWidth, 0, singleWidth, singleHeight);
 
-            // Trigger the download immediately
             triggerDownload(finalCanvas, originalFilename);
         }
 
-        // Logic for forcing the browser to save the file
+        // iOS Safari safe download handler
         function triggerDownload(canvas, originalFilename) {
-            // Convert canvas drawing to a high-quality PNG
-            const dataURL = canvas.toDataURL('image/png', 1.0);
-            
-            // Create an invisible anchor link
-            const link = document.createElement('a');
-            link.download = `${originalFilename}_side_by_side.png`;
-            link.href = dataURL;
-            
-            // Simulate a click on the link to trigger the 'Save As' prompt
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-
-            statusText.style.color = '#27ae60';
-            statusText.innerText = 'Success! Your file is ready for printing.';
-            
-            // Clear status after a few seconds
-            setTimeout(() => {
-                if (statusText.innerText.includes('Success')) {
-                    statusText.innerText = '';
+            canvas.toBlob((blob) => {
+                if (!blob) {
+                    statusText.style.color = '#c0392b';
+                    statusText.innerText = 'Error generating image.';
+                    return;
                 }
-            }, 5000);
+
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.download = `${originalFilename}_side_by_side.png`;
+                link.href = url;
+                
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+
+                // Clean up Blob memory after short delay
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+                statusText.style.color = '#27ae60';
+                statusText.innerText = 'Success! Your file is ready.';
+                
+                setTimeout(() => {
+                    if (statusText.innerText.includes('Success')) {
+                        statusText.innerText = '';
+                    }
+                }, 5000);
+            }, 'image/png', 1.0);
         }
 
-        // Helper function to keep file names clean
+        // Helper function
         function getFilenameWithoutExtension(filename) {
             return filename.substring(0, filename.lastIndexOf('.')) || filename;
         }
