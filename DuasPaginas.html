@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Duplicador!</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+        // Configure the PDF.js web worker
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    </script>
+
+    <style>
+        /* CSS resets for uniform rendering across different browsers */
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        body {
+            background-color: #f4f7f6;
+            color: #333;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            background: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.08);
+            width: 100%;
+            max-width: 600px;
+            padding: 40px;
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 24px;
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+
+        p {
+            color: #7f8c8d;
+            font-size: 14px;
+            margin-bottom: 30px;
+            line-height: 1.5;
+        }
+
+        /* Styling for the drag-and-drop zone */
+        .drop-zone {
+            border: 2px dashed #3498db;
+            border-radius: 8px;
+            padding: 50px 20px;
+            background-color: #ebf5fb;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        .drop-zone:hover, .drop-zone.dragover {
+            background-color: #d6eaf8;
+            border-color: #2980b9;
+        }
+
+        .drop-zone-text {
+            font-size: 16px;
+            font-weight: bold;
+            color: #2980b9;
+            pointer-events: none;
+        }
+
+        /* Hide the ugly default file input */
+        #fileInput {
+            display: none;
+        }
+
+        .btn {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: background-color 0.2s;
+            display: inline-block;
+        }
+
+        .btn:hover {
+            background-color: #2980b9;
+        }
+
+        #status {
+            margin-top: 20px;
+            font-size: 14px;
+            font-weight: bold;
+            color: #27ae60;
+            min-height: 20px;
+        }
+
+        /* Mobile Responsiveness */
+        @media (max-width: 600px) {
+            .container {
+                padding: 20px;
+            }
+            .drop-zone {
+                padding: 30px 10px;
+            }
+            h1 {
+                font-size: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Duplicador</h1>
+        <p>Faça o upload de uma imagem ou PDF. A ferramenta dobrará automaticamente a largura, duplicará o conteúdo lado a lado e solicitará que você salve o novo arquivo.</p>
+
+        <div class="drop-zone" id="dropZone">
+            <span class="drop-zone-text">Arraste e solte o arquivo aqui<br><br>ou clique para procurar</span>
+            <input type="file" id="fileInput" accept="image/png, image/jpeg, image/jpg, application/pdf">
+        </div>
+
+        <div id="status"></div>
+    </div>
+
+    <script>
+        // DOM Elements
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const statusText = document.getElementById('status');
+
+        // Event Listeners for Drag and Drop
+        dropZone.addEventListener('click', () => fileInput.click());
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('dragover');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            if (e.dataTransfer.files.length > 0) {
+                handleFile(e.dataTransfer.files[0]);
+            }
+        });
+
+        // Event Listener for File Selection via Browse
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFile(e.target.files[0]);
+            }
+        });
+
+        // Main function to route files based on type
+        function handleFile(file) {
+            statusText.style.color = '#333';
+            statusText.innerText = 'Processing... Please wait.';
+
+            const fileType = file.type;
+
+            if (fileType.includes('image')) {
+                processImage(file);
+            } else if (fileType === 'application/pdf') {
+                processPDF(file);
+            } else {
+                statusText.style.color = '#c0392b';
+                statusText.innerText = 'Error: Please upload a valid Image (JPG/PNG) or PDF file.';
+            }
+            
+            // Reset input so the same file can be uploaded again if needed
+            fileInput.value = "";
+        }
+
+        // Logic for handling standard images
+        function processImage(file) {
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const img = new Image();
+                img.onload = function() {
+                    createSideBySideAndDownload(img, getFilenameWithoutExtension(file.name));
+                }
+                img.src = event.target.result;
+            }
+            reader.readAsDataURL(file);
+        }
+
+        // Logic for handling PDFs via PDF.js
+        async function processPDF(file) {
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                const typedarray = new Uint8Array(arrayBuffer);
+                
+                // Load the PDF document
+                const loadingTask = pdfjsLib.getDocument(typedarray);
+                const pdf = await loadingTask.promise;
+                
+                // Fetch the first page
+                const page = await pdf.getPage(1);
+                
+                // Set scale high to ensure print quality
+                const scale = 3; 
+                const viewport = page.getViewport({ scale: scale });
+                
+                // Create a temporary canvas to render the PDF page
+                const tempCanvas = document.createElement('canvas');
+                const context = tempCanvas.getContext('2d');
+                tempCanvas.height = viewport.height;
+                tempCanvas.width = viewport.width;
+                
+                // Render PDF page into canvas context
+                const renderContext = {
+                    canvasContext: context,
+                    viewport: viewport
+                };
+                
+                await page.render(renderContext).promise;
+                
+                // Pass the rendered PDF canvas to our duplication logic
+                createSideBySideAndDownload(tempCanvas, getFilenameWithoutExtension(file.name));
+
+            } catch (error) {
+                console.error("PDF Processing Error:", error);
+                statusText.style.color = '#c0392b';
+                statusText.innerText = 'Error processing PDF. Please try an image.';
+            }
+        }
+
+        // The core logic that replicates your MS Paint workflow
+        function createSideBySideAndDownload(sourceMedia, originalFilename) {
+            // Create the final canvas
+            const finalCanvas = document.createElement('canvas');
+            const ctx = finalCanvas.getContext('2d');
+
+            // Double the width, keep height exactly the same
+            const singleWidth = sourceMedia.width;
+            const singleHeight = sourceMedia.height;
+            
+            finalCanvas.width = singleWidth * 2;
+            finalCanvas.height = singleHeight;
+
+            // Fill with a white background just in case the source has transparency
+            ctx.fillStyle = "#FFFFFF";
+            ctx.fillRect(0, 0, finalCanvas.width, finalCanvas.height);
+
+            // Stamp the image on the left side
+            ctx.drawImage(sourceMedia, 0, 0, singleWidth, singleHeight);
+            
+            // Stamp the image on the right side
+            ctx.drawImage(sourceMedia, singleWidth, 0, singleWidth, singleHeight);
+
+            // Trigger the download immediately
+            triggerDownload(finalCanvas, originalFilename);
+        }
+
+        // Logic for forcing the browser to save the file
+        function triggerDownload(canvas, originalFilename) {
+            // Convert canvas drawing to a high-quality PNG
+            const dataURL = canvas.toDataURL('image/png', 1.0);
+            
+            // Create an invisible anchor link
+            const link = document.createElement('a');
+            link.download = `${originalFilename}_side_by_side.png`;
+            link.href = dataURL;
+            
+            // Simulate a click on the link to trigger the 'Save As' prompt
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+
+            statusText.style.color = '#27ae60';
+            statusText.innerText = 'Success! Your file is ready for printing.';
+            
+            // Clear status after a few seconds
+            setTimeout(() => {
+                if (statusText.innerText.includes('Success')) {
+                    statusText.innerText = '';
+                }
+            }, 5000);
+        }
+
+        // Helper function to keep file names clean
+        function getFilenameWithoutExtension(filename) {
+            return filename.substring(0, filename.lastIndexOf('.')) || filename;
+        }
+    </script>
+</body>
+</html>
